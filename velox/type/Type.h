@@ -89,7 +89,8 @@ enum class TypeKind : int8_t {
   UNKNOWN = 33,
   FUNCTION = 34,
   OPAQUE = 35,
-  INVALID = 36
+  INVALID = 36,
+  RANODM = 37
 };
 
 VELOX_DECLARE_ENUM_NAME(TypeKind);
