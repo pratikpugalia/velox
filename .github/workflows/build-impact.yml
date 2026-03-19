@@ -1,0 +1,133 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Build Impact Analysis
+
+on:
+  pull_request:
+    paths:
+      - velox/**
+      - CMakeLists.txt
+      - CMake/**
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.repository }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build-impact:
+    name: Analyze Build Impact
+    runs-on: 8-core-ubuntu
+    container: ghcr.io/facebookincubator/velox-dev:adapters
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUILD_DIR: _build/impact
+      VELOX_DEPENDENCY_SOURCE: SYSTEM
+      cudf_SOURCE: BUNDLED
+      faiss_SOURCE: BUNDLED
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Fix git permissions
+        run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+
+      - name: Get changed files
+        id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          merge_base_commit=$(gh api -q '.merge_base_commit.sha' \
+            /repos/${{ github.repository }}/compare/${{ github.repository_owner }}:$BASE_REF...$PR_OWNER:$HEAD_REF \
+          )
+          {
+            echo 'files<<EOF'
+            git diff --name-only "$merge_base_commit..$HEAD_SHA"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create file API query
+        run: |
+          mkdir -p $BUILD_DIR/.cmake/api/v1/query
+          touch $BUILD_DIR/.cmake/api/v1/query/codemodel-v2
+
+      - name: CMake configure
+        run: |
+          source /opt/rh/gcc-toolset-14/enable
+          cmake \
+            -B $BUILD_DIR \
+            -DVELOX_MONO_LIBRARY=OFF \
+            -DVELOX_ENABLE_BENCHMARKS=ON \
+            -DVELOX_ENABLE_EXAMPLES=ON \
+            -DVELOX_ENABLE_ARROW=ON \
+            -DVELOX_ENABLE_GEO=ON \
+            -DVELOX_ENABLE_PARQUET=ON \
+            -DVELOX_ENABLE_HDFS=ON \
+            -DVELOX_ENABLE_S3=ON \
+            -DVELOX_ENABLE_GCS=ON \
+            -DVELOX_ENABLE_ABFS=ON \
+            -DVELOX_ENABLE_CUDF=ON \
+            -DVELOX_ENABLE_FAISS=ON \
+            -DVELOX_ENABLE_REMOTE_FUNCTIONS=ON
+
+      - name: Detect affected targets
+        env:
+          BUILD_DIR: ${{ env.BUILD_DIR }}
+          CHANGED_FILES_LIST: ${{ steps.changes.outputs.files }}
+          COMMENT_OUTPUT: /tmp/build-impact-comment.md
+        run: python3 .github/scripts/detect-affected-modules.py
+
+      - name: Post or update PR comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/build-impact-comment.md', 'utf8');
+            const marker = '<!-- build-impact-analysis -->';
+            const fullBody = marker + '\n' + body;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: fullBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: fullBody,
+              });
+            }
