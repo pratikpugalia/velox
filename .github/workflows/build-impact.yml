@@ -91,6 +91,7 @@ jobs:
             -DVELOX_ENABLE_S3=ON \
             -DVELOX_ENABLE_GCS=ON \
             -DVELOX_ENABLE_ABFS=ON \
+            -DVELOX_ENABLE_WAVE=ON \
             -DVELOX_ENABLE_CUDF=ON \
             -DVELOX_ENABLE_FAISS=ON \
             -DVELOX_ENABLE_REMOTE_FUNCTIONS=ON
