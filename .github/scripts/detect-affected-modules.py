@@ -366,6 +366,21 @@ def main():
         f"File-to-target mappings: {len(cmake_data['file_to_targets'])} source files"
     )
 
+    # Debug: show what each changed file maps to.
+    file_to_targets = cmake_data["file_to_targets"]
+    print("\n=== Debug: Changed file mappings ===")
+    for f in changed_files:
+        if f in file_to_targets:
+            print(f"  {f} -> {file_to_targets[f]} (exact)")
+        else:
+            print(f"  {f} -> NO MATCH")
+
+    # Debug: sample of file API paths for velox_type target.
+    if "velox_type" in cmake_data["targets"]:
+        print("\n=== Debug: velox_type sources ===")
+        for src in cmake_data["targets"]["velox_type"]["sources"][:20]:
+            print(f"  {src}")
+
     # Compute metrics.
     metrics = compute_metrics(changed_files, cmake_data)
 
