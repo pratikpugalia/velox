@@ -79,7 +79,7 @@ jobs:
           source /opt/rh/gcc-toolset-14/enable
           export CC=gcc CXX=g++
           cmake \
-            -DCUDA_ARCHITECTURES=70 \
+            -DCMAKE_CUDA_ARCHITECTURES=70 \
             -B $BUILD_DIR \
             -DVELOX_MONO_LIBRARY=OFF \
             -DVELOX_ENABLE_BENCHMARKS=ON \
