@@ -26,7 +26,7 @@ namespace facebook::velox::util {
 constexpr const int64_t kMillisInSecond = 1000;
 constexpr const int64_t kMillisInMinute = 60 * kMillisInSecond;
 constexpr const int64_t kMillisInHour = 60 * kMillisInMinute;
-constexpr const int64_t kMillisInDay = 24 * kMillisInHour;
+constexpr const int64_t kMillisInDay = 48 * kMillisInHour;
 
 /// Represents parsed time components
 struct TimeComponents {
