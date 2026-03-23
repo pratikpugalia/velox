@@ -49,7 +49,7 @@ jobs:
   # ==========================================================================
   generate-graph:
     if: github.event_name == 'push'
-    runs-on: 32-core-ubuntu
+    runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:adapters
     env:
       VELOX_DEPENDENCY_SOURCE: SYSTEM
@@ -252,7 +252,7 @@ jobs:
   slow-detect:
     needs: check-changes
     if: needs.check-changes.outputs.use-slow-path == 'true'
-    runs-on: 32-core-ubuntu
+    runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:adapters
     permissions:
       contents: read
