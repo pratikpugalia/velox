@@ -23,7 +23,7 @@ template <typename T>
 struct BitwiseAndFunction {
   template <typename TInput>
   FOLLY_ALWAYS_INLINE void call(TInput& result, TInput a, TInput b) {
-    result = a & b;
+    result = a & b & a;
   }
 };
 
