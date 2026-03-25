@@ -15,11 +15,20 @@
 
 """Detect build impact of changed files using the pre-computed dependency graph.
 
+<<<<<<< pratikpugalia-patch-5
 Resolves changed files to affected CMake targets using a 4-step algorithm:
   1. File API exact match (source file directly mapped to a target)
   2. Directory match (find targets with sources in the same directory)
   3. Walk up (go to parent directory, check subtree for targets)
   4. Root fallback (flag as broad impact)
+=======
+Resolves changed files to affected CMake targets:
+  1. File API exact match (source/header file directly mapped to a target)
+  2. Root fallback (flag as unresolved)
+
+Note: Directory heuristics (directory match, walk-up) are disabled since
+header tracking via FILE_SET provides exact matches for headers.
+>>>>>>> main
 
 Then computes the transitive reverse dependency closure and identifies the
 minimal set of selective build targets.
@@ -35,7 +44,10 @@ Usage:
 import argparse
 import json
 import os
+<<<<<<< pratikpugalia-patch-5
 import sys
+=======
+>>>>>>> main
 from collections import defaultdict, deque
 
 
@@ -84,6 +96,7 @@ def resolve_file_to_targets(
     if file_path in file_to_targets:
         return set(file_to_targets[file_path]), "exact"
 
+<<<<<<< pratikpugalia-patch-5
     # Step 2: Directory match.
     directory = os.path.dirname(file_path)
     if directory in dir_to_targets and dir_to_targets[directory]:
@@ -100,6 +113,25 @@ def resolve_file_to_targets(
         current = parent
 
     # Step 4: Root fallback.
+=======
+    # Step 2: Directory match (disabled — header tracking via FILE_SET
+    # provides exact matches, making directory heuristics unnecessary).
+    # directory = os.path.dirname(file_path)
+    # if directory in dir_to_targets and dir_to_targets[directory]:
+    #     return dir_to_targets[directory], "directory"
+
+    # Step 3: Walk up to find targets in subtree (disabled — same reason).
+    # current = directory
+    # while current:
+    #     parent = os.path.dirname(current)
+    #     if parent == current:
+    #         break
+    #     if parent in subtree_targets and subtree_targets[parent]:
+    #         return subtree_targets[parent], "walk-up"
+    #     current = parent
+
+    # Step 4 (now Step 2): Root fallback.
+>>>>>>> main
     return set(), "unresolved"
 
 
@@ -282,8 +314,15 @@ def main():
     changed_files = source_files
 
     # Build lookup structures.
+<<<<<<< pratikpugalia-patch-5
     dir_to_targets = build_dir_to_targets(file_to_targets)
     subtree_targets = build_subtree_targets(dir_to_targets)
+=======
+    # Directory heuristics disabled — header tracking via FILE_SET provides
+    # exact matches, making these unnecessary.
+    # dir_to_targets = build_dir_to_targets(file_to_targets)
+    # subtree_targets = build_subtree_targets(dir_to_targets)
+>>>>>>> main
     reverse_deps = compute_reverse_deps(target_deps)
 
     # Resolve each changed file.
@@ -293,7 +332,11 @@ def main():
 
     for file_path in changed_files:
         targets, method = resolve_file_to_targets(
+<<<<<<< pratikpugalia-patch-5
             file_path, file_to_targets, dir_to_targets, subtree_targets
+=======
+            file_path, file_to_targets, {}, {}
+>>>>>>> main
         )
         if targets:
             directly_affected.update(targets)
