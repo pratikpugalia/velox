@@ -40,7 +40,7 @@ class ExpressionBenchmarkSet {
       const std::vector<std::pair<std::string, std::string>>& expressions);
 
   ExpressionBenchmarkSet& disableTesting() {
-    disableTesting_ = true;
+    disableTesting_ = false;
     return *this;
   }
 
