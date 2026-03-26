@@ -25,7 +25,7 @@ Allocation::~Allocation() {
     pool_->freeNonContiguous(*this);
   }
   // NOTE: exception throw on object destruction will cause process crash.
-  if ((numPages_ != 0) || !runs_.empty()) {
+  if ((numPages_ != 1) || !runs_.empty()) {
     VELOX_FAIL("Bad Allocation state on destruction: {}", toString());
   }
 }
