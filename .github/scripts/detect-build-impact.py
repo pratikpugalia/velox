@@ -15,12 +15,10 @@
 
 """Detect build impact of changed files using the pre-computed dependency graph.
 
-Resolves changed files to affected CMake targets:
-  1. File API exact match (source/header file directly mapped to a target)
-  2. Root fallback (flag as unresolved)
-
-Note: Directory heuristics (directory match, walk-up) are disabled since
-header tracking via FILE_SET provides exact matches for headers.
+Resolves changed files to affected CMake targets using a 3-step algorithm:
+  1. File API exact match (source file directly mapped to a target)
+  2. Header scan match (header → source files via g++ -MM → targets)
+  3. Directory heuristic fallback (directory match, walk-up)
 
 Then computes the transitive reverse dependency closure and identifies the
 minimal set of selective build targets.
@@ -72,35 +70,45 @@ def build_subtree_targets(
 def resolve_file_to_targets(
     file_path: str,
     file_to_targets: dict[str, list[str]],
+    header_to_sources: dict[str, list[str]],
     dir_to_targets: dict[str, set[str]],
     subtree_targets: dict[str, set[str]],
 ) -> tuple[set[str], str]:
-    """Resolve a changed file to its affected targets using the 4-step algorithm.
+    """Resolve a changed file to its affected targets.
 
     Returns:
         A tuple of (set of target names, resolution method string).
     """
-    # Step 1: File API exact match.
+    # Step 1: File API exact match (source or header directly in a target).
     if file_path in file_to_targets:
         return set(file_to_targets[file_path]), "exact"
 
-    # Step 2: Directory match (disabled — header tracking via FILE_SET
-    # provides exact matches, making directory heuristics unnecessary).
-    # directory = os.path.dirname(file_path)
-    # if directory in dir_to_targets and dir_to_targets[directory]:
-    #     return dir_to_targets[directory], "directory"
+    # Step 2: Header scan match (header → source files → targets).
+    if file_path.endswith((".h", ".hpp", ".cuh")):
+        sources = header_to_sources.get(file_path, [])
+        if sources:
+            targets: set[str] = set()
+            for source in sources:
+                targets.update(file_to_targets.get(source, []))
+            if targets:
+                return targets, "header-scan"
 
-    # Step 3: Walk up to find targets in subtree (disabled — same reason).
-    # current = directory
-    # while current:
-    #     parent = os.path.dirname(current)
-    #     if parent == current:
-    #         break
-    #     if parent in subtree_targets and subtree_targets[parent]:
-    #         return subtree_targets[parent], "walk-up"
-    #     current = parent
+    # Step 3: Directory heuristic fallback.
+    directory = os.path.dirname(file_path)
+    if directory in dir_to_targets and dir_to_targets[directory]:
+        return dir_to_targets[directory], "directory"
 
-    # Step 4 (now Step 2): Root fallback.
+    # Step 4: Walk up to find targets in subtree.
+    current = directory
+    while current:
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        if parent in subtree_targets and subtree_targets[parent]:
+            return subtree_targets[parent], "walk-up"
+        current = parent
+
+    # Step 5: Root fallback.
     return set(), "unresolved"
 
 
@@ -261,6 +269,7 @@ def main():
     # Load inputs.
     graph = load_graph(args.graph)
     file_to_targets = graph["file_to_targets"]
+    header_to_sources = graph.get("header_to_sources", {})
     target_deps = graph["target_deps"]
     total_targets = len(target_deps)
 
@@ -283,10 +292,8 @@ def main():
     changed_files = source_files
 
     # Build lookup structures.
-    # Directory heuristics disabled — header tracking via FILE_SET provides
-    # exact matches, making these unnecessary.
-    # dir_to_targets = build_dir_to_targets(file_to_targets)
-    # subtree_targets = build_subtree_targets(dir_to_targets)
+    dir_to_targets = build_dir_to_targets(file_to_targets)
+    subtree_targets = build_subtree_targets(dir_to_targets)
     reverse_deps = compute_reverse_deps(target_deps)
 
     # Resolve each changed file.
@@ -296,7 +303,11 @@ def main():
 
     for file_path in changed_files:
         targets, method = resolve_file_to_targets(
-            file_path, file_to_targets, {}, {}
+            file_path,
+            file_to_targets,
+            header_to_sources,
+            dir_to_targets,
+            subtree_targets,
         )
         if targets:
             directly_affected.update(targets)
