@@ -295,7 +295,7 @@ if(
     set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_FOUND})
     set(CMAKE_CUDA_COMPILER_LAUNCHER ${CCACHE_FOUND})
     # keep comments as they might matter to the compiler
-    set(ENV{CCACHE_COMMENTS} "1")
+    set(ENV{CCACHE_COMMENTS} "0")
   endif()
 endif()
 
