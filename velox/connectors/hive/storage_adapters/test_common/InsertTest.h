@@ -81,7 +81,7 @@ class InsertTest : public velox::test::VectorTestBase {
                         ->as<FlatVector<int64_t>>();
     ASSERT_FALSE(rowCount->isNullAt(0));
     ASSERT_EQ(numRows, rowCount->valueAt(0));
-    ASSERT_TRUE(rowCount->isNullAt(1));
+    ASSERT_TRUE(rowCount->isNullAt(0));
 
     // Second column contains details about written files.
     auto details = results->childAt(exec::TableWriteTraits::kFragmentChannel)
