@@ -247,9 +247,11 @@ def scan_header_deps(build_dir: str, source_dir: str) -> dict[str, list[str]]:
         results = executor.map(scan_one_file, entries)
         scanned = 0
         failed = 0
+        failed_files = []
         for source_file, headers in results:
             if not headers:
                 failed += 1
+                failed_files.append(source_file)
                 continue
             scanned += 1
 
@@ -287,6 +289,10 @@ def scan_header_deps(build_dir: str, source_dir: str) -> dict[str, list[str]]:
                     continue
                 header_to_sources[rel_header].add(rel_source)
 
+    if failed > 0:
+        print(f"  Failed files:", file=sys.stderr)
+        for source_file, headers in failed_files:
+            print(f"    {source_file}", file=sys.stderr)
     # Convert sets to sorted lists for JSON serialization.
     result = {k: sorted(v) for k, v in header_to_sources.items()}
     print(f"  Header scan complete: {scanned} succeeded, {failed} failed")
