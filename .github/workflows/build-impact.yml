@@ -223,7 +223,11 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:adapters
     env:
+      VELOX_DEPENDENCY_SOURCE: SYSTEM
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Fix git permissions
