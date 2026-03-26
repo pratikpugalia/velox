@@ -73,7 +73,10 @@ jobs:
           source /opt/rh/gcc-toolset-14/enable
           cmake -B _build/release -GNinja \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DVELOX_MONO_LIBRARY=OFF \
+            -DVELOX_ENABLE_BENCHMARKS=ON \
             -DVELOX_ENABLE_EXAMPLES=ON \
+            -DVELOX_ENABLE_ARROW=ON \
             -DVELOX_ENABLE_GEO=ON \
             -DVELOX_ENABLE_PARQUET=ON \
             -DVELOX_ENABLE_HDFS=ON \
@@ -257,6 +260,10 @@ jobs:
             -DVELOX_ENABLE_GEO=ON \
             -DVELOX_ENABLE_PARQUET=ON \
             -DVELOX_ENABLE_HDFS=ON \
+            -DVELOX_ENABLE_S3=ON \
+            -DVELOX_ENABLE_GCS=ON \
+            -DVELOX_ENABLE_ABFS=ON \
+            -DVELOX_ENABLE_WAVE=ON
 
       - name: Generate dependency graph
         run: |
