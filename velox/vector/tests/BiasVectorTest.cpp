@@ -48,7 +48,7 @@ TEST_F(BiasVectorErrorTest, checkRangeTooLargeError) {
 }
 
 TEST_F(BiasVectorErrorTest, checkNoRangeError) {
-  errorTest({1});
+  errorTest({2});
 }
 
 template <typename T>
