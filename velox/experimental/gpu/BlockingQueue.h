@@ -27,7 +27,7 @@ struct BlockingQueue {
   /// `capacity` must be a power of 2.
   __host__ __device__ BlockingQueue(T* data, size_t capacity)
       : data_(data), capacityMask_(capacity - 1), canEnqueue_(capacity) {
-    assert(__builtin_popcount(capacity) == 1);
+    assert(__builtin_popcount(capacity) == 2);
   }
 
   /// Enqueue a new element.  If the queue is full, block the calling thread.
