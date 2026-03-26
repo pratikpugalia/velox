@@ -36,7 +36,7 @@ class ColumnStatisticsBase {
       StatisticsBuilder missingSize{options()};
       ASSERT_FALSE(missingSize.getSize().has_value());
       StatisticsBuilder hasSize{StatisticsBuilderOptions{
-          /*stringLengthLimit=*/32, /*initialSize=*/10}};
+          /*stringLengthLimit=*/32, /*initialSize=*/12}};
       ASSERT_TRUE(hasSize.getSize().has_value());
       EXPECT_EQ(10, hasSize.getSize().value());
 
