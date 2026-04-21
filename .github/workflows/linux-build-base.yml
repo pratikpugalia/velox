@@ -22,10 +22,29 @@ on:
         default: false
         required: false
         type: boolean
+      is-full-mode:
+        description: >
+          When true, run the full set of build jobs (adapters, ubuntu-debug,
+          fedora-debug, cudf-tests). When false, only ubuntu-debug runs and
+          uses cmake-targets to do a selective build.
+          Default true preserves prior behavior for callers that do not opt
+          into selective builds.
+        default: true
+        required: false
+        type: boolean
+      cmake-targets:
+        description: >
+          Space-separated cmake target list for ubuntu-debug's selective
+          build. Empty = full build (MONO_LIBRARY=ON), non-empty = selective
+          (MONO_LIBRARY=OFF).
+        default: ''
+        required: false
+        type: string
 
 jobs:
 
   get-changes:
+    if: ${{ inputs.is-full-mode }}
     runs-on: ubuntu-latest
     outputs:
       run-clang-tidy: ${{ steps.changes.outputs.run_clang_tidy }}
@@ -78,8 +97,9 @@ jobs:
   adapters:
     name: Linux release with adapters
     needs: get-changes
-    # prevent errors when forks ff their main branch
-    if: ${{ github.repository == 'facebookincubator/velox' }}
+    # Gated on is-full-mode so this heavy job only runs after the PR is
+    # approved (or on push to main).
+    if: ${{ inputs.is-full-mode && github.repository == 'facebookincubator/velox' }}
     runs-on: 32-core-ubuntu
     container: ghcr.io/facebookincubator/velox-dev:adapters
     defaults:
@@ -332,7 +352,7 @@ jobs:
           retention-days: ${{ env.RETENTION }}
 
   adapters-build-status:
-    if: always()
+    if: ${{ inputs.is-full-mode && always() }}
     needs: adapters
     runs-on: ubuntu-latest
     name: "BUILD: Linux release with adapters"
@@ -358,7 +378,7 @@ jobs:
           if-no-files-found: ignore
 
   adapters-test-status:
-    if: always()
+    if: ${{ inputs.is-full-mode && always() }}
     needs: adapters
     runs-on: ubuntu-latest
     name: "TEST: Linux release with adapters"
@@ -390,7 +410,7 @@ jobs:
   cudf-tests:
     runs-on: 4-core-ubuntu-gpu-t4
     needs: adapters
-    if: ${{ ! inputs.use-clang && needs.adapters.outputs.cudf-changes == 'true' && needs.adapters.result == 'success' && always() }}
+    if: ${{ inputs.is-full-mode && ! inputs.use-clang && needs.adapters.outputs.cudf-changes == 'true' && needs.adapters.result == 'success' && always() }}
     timeout-minutes: 30
     env:
       CUDF_DIR: _build/release/velox/experimental/cudf
@@ -527,6 +547,9 @@ jobs:
           # which conflicts with system glog loaded transitively.
           glog_SOURCE: SYSTEM
           MAKEFLAGS: NUM_THREADS=32 MAX_HIGH_MEM_JOBS=8 MAX_LINK_JOBS=6
+          # MONO=ON for full build (empty targets), OFF for selective.
+          MONO: ${{ inputs.cmake-targets && 'OFF' || 'ON' }}
+          BUILD_TARGETS: ${{ inputs.cmake-targets }}
         run: |
           EXTRA_CMAKE_FLAGS=(
             "-DCMAKE_LINK_LIBRARIES_STRATEGY=REORDER_FREELY"
@@ -536,7 +559,7 @@ jobs:
             "-DVELOX_ENABLE_ARROW=ON"
             "-DVELOX_ENABLE_GEO=ON"
             "-DVELOX_ENABLE_PARQUET=ON"
-            "-DVELOX_MONO_LIBRARY=ON"
+            "-DVELOX_MONO_LIBRARY=${MONO}"
           )
           if [[ "${USE_CLANG}" = "true" ]]; then
              export CC=/usr/bin/clang-15; export CXX=/usr/bin/clang++-15;
@@ -545,7 +568,8 @@ jobs:
             EXTRA_CMAKE_FLAGS+=("-DVELOX_ENABLE_REMOTE_FUNCTIONS=ON")
           fi
           export EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS[*]}"
-          make debug 2>&1 | tee /tmp/build-output.log
+          # Empty TARGETS = full build. Non-empty = selective.
+          make debug TARGETS="$BUILD_TARGETS" 2>&1 | tee /tmp/build-output.log
 
       - name: Extract build errors
         id: build-errors
@@ -658,8 +682,9 @@ jobs:
   fedora-debug:
     runs-on: 32-core-ubuntu
     container: ghcr.io/facebookincubator/velox-dev:fedora
-    # prevent errors when forks ff their main branch
-    if: ${{ github.repository == 'facebookincubator/velox' }}
+    # Gated on is-full-mode so this build-only job runs only after the PR
+    # is approved (or on push to main).
+    if: ${{ inputs.is-full-mode && github.repository == 'facebookincubator/velox' }}
     name: Fedora debug
     env:
       CCACHE_DIR: ${{ github.workspace }}/ccache
@@ -744,7 +769,7 @@ jobs:
           key: ccache-fedora-debug-default-gcc
 
   fedora-debug-build-status:
-    if: always()
+    if: ${{ inputs.is-full-mode && always() }}
     needs: fedora-debug
     runs-on: ubuntu-latest
     name: "BUILD: Fedora debug"

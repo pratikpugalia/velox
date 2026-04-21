@@ -29,6 +29,10 @@ on:
       - scripts/setup-helper-functions.sh
       - .github/workflows/linux-build.yml
       - .github/workflows/linux-build-base.yml
+      - .github/workflows/selective-build-plan.yml
+      - .github/scripts/plan-selective-build.py
+      - .github/scripts/generate-dependency-graph.py
+      - .github/actions/generate-dependency-graph/action.yml
 
   pull_request:
     paths:
@@ -42,6 +46,16 @@ on:
       - scripts/setup-helper-functions.sh
       - .github/workflows/linux-build.yml
       - .github/workflows/linux-build-base.yml
+      - .github/workflows/selective-build-plan.yml
+      - .github/scripts/plan-selective-build.py
+      - .github/scripts/generate-dependency-graph.py
+      - .github/actions/generate-dependency-graph/action.yml
+
+  # Re-runs the workflow when a PR receives an approving review so that
+  # adapters/fedora-debug switch on and ubuntu-debug switches from
+  # targeted to full build.
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: read
@@ -51,6 +65,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decide full vs targeted vs skip and (when targeted) compute the
+  # selective target list. Uploads the selective-build-comment artifact.
+  #
+  # Skip the plan entirely on non-approving review events (commented,
+  # changes_requested, dismissed). Without this gate, GitHub still spawns
+  # an ubuntu-latest runner just so the plan can decide "skip" — wasted
+  # minutes and a billed run for every review of any kind.
+  plan:
+    if: github.event_name != 'pull_request_review' || github.event.review.state == 'approved'
+    uses: ./.github/workflows/selective-build-plan.yml
+
+  # Run the build. adapters / fedora-debug only run in full mode;
+  # ubuntu-debug always runs and consumes the plan outputs when targeted.
+  # Default `needs: plan` semantics also skip this job when `plan` itself
+  # was skipped (the non-approving review case above) — exactly what we
+  # want.
   linux-gcc:
     name: Build with GCC
+    needs: plan
+    if: needs.plan.outputs.mode != 'skip'
     uses: ./.github/workflows/linux-build-base.yml
+    with:
+      is-full-mode: ${{ needs.plan.outputs.mode == 'full' }}
+      cmake-targets: ${{ needs.plan.outputs.cmake_targets }}

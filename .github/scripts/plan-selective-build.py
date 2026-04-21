@@ -13,9 +13,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Detect build impact of changed files using the pre-computed dependency graph.
+"""Plan a selective build by computing affected CMake targets from changed files.
 
-Early exits:
+Two modes of invocation:
+
+1. Decide which detection path to run (no graph required):
+
+       python plan-selective-build.py \\
+           --changed-files changed_files.txt \\
+           --decide-mode-only
+
+   Prints `mode=<noop|full|slow|fast>` to $GITHUB_OUTPUT (or stdout).
+
+2. Compute affected targets and write the PR comment:
+
+       python plan-selective-build.py \\
+           --graph dependency-graph.json \\
+           --changed-files changed_files.txt \\
+           --build-type debug \\
+           --output comment.md
+
+Early exits when computing:
   - velox/experimental/ or velox/external/ changes → full build recommended
     (CUDA-only and vendored code outside the dependency graph).
 
@@ -29,19 +47,60 @@ File resolution:
 
 Then computes the transitive reverse dependency closure and identifies the
 minimal set of selective build targets.
-
-Usage:
-    python detect-build-impact.py \\
-        --graph dependency-graph.json \\
-        --changed-files changed_files.txt \\
-        --build-type release \\
-        --output comment.md
 """
 
 import argparse
 import json
 import os
+import re
+import sys
 from collections import defaultdict, deque
+
+
+# Paths whose changes require a full build because they are outside the
+# dependency graph (CUDA-only and vendored code).
+FULL_BUILD_PREFIXES = ("velox/experimental/", "velox/external/")
+
+# CMake files whose changes invalidate the cached graph from main: targets,
+# sources, or dependencies may have shifted, so the graph must be
+# regenerated from the PR branch before computing impact. Matches:
+#   - any CMakeLists.txt under velox/ (including velox/CMakeLists.txt)
+#   - any CMake/*.cmake helper module
+# Does NOT match the repo-root CMakeLists.txt — changes to the top-level
+# project entry-point are rare and usually structural enough that the
+# noop → full fallback path covers them adequately.
+SLOW_PATH_PATTERN = re.compile(r"(velox/(.+/)?CMakeLists\.txt|CMake/.+\.cmake)$")
+
+
+def decide_mode(changed_files: list[str]) -> str:
+    """Decide which detection path to run, based on changed files.
+
+    Returns one of:
+      - 'full'  — files outside the dependency graph changed; a full build
+                  is required regardless of the cached graph.
+      - 'slow'  — a CMakeLists.txt under velox/ or a CMake/*.cmake changed;
+                  the cached graph from main may be stale, regenerate from
+                  the PR branch.
+      - 'noop'  — no velox/* files changed; nothing to analyze.
+      - 'fast'  — default path; use the cached graph from main.
+    """
+    if any(f.startswith(FULL_BUILD_PREFIXES) for f in changed_files):
+        return "full"
+    if any(SLOW_PATH_PATTERN.match(f) for f in changed_files):
+        return "slow"
+    if not any(f.startswith("velox/") for f in changed_files):
+        return "noop"
+    return "fast"
+
+
+def emit_github_output(key: str, value: str) -> None:
+    """Append a key=value line to $GITHUB_OUTPUT, falling back to stdout."""
+    line = f"{key}={value}"
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if output_path:
+        with open(output_path, "a") as fp:
+            fp.write(line + "\n")
+    print(line)
 
 
 def load_graph(graph_path: str) -> dict:
@@ -139,7 +198,7 @@ def generate_comment(
     total_affected = len(all_affected)
 
     lines = []
-    lines.append("## Build Impact Analysis\n")
+    lines.append("## Selective Build Plan\n")
 
     # Group changed files by target.
     target_files: dict[str, list[str]] = defaultdict(list)
@@ -209,12 +268,14 @@ def generate_comment(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Detect build impact of changed files."
+        description="Plan a selective build from changed files."
     )
     parser.add_argument(
         "--graph",
-        required=True,
-        help="Path to the dependency graph JSON file.",
+        help=(
+            "Path to the dependency graph JSON file. Required unless "
+            "--decide-mode-only is given."
+        ),
     )
     parser.add_argument(
         "--changed-files",
@@ -236,7 +297,31 @@ def main():
         default="comment.md",
         help="Output file for the PR comment markdown (default: comment.md).",
     )
+    parser.add_argument(
+        "--decide-mode-only",
+        action="store_true",
+        help=(
+            "Print 'mode=<noop|full|slow|fast>' to $GITHUB_OUTPUT (or "
+            "stdout) and exit. Does not require --graph."
+        ),
+    )
     args = parser.parse_args()
+
+    with open(args.changed_files) as fp:
+        changed_files = [
+            line.strip() for line in fp if line.strip() and not line.startswith("#")
+        ]
+
+    if args.decide_mode_only:
+        emit_github_output("mode", decide_mode(changed_files))
+        return
+
+    if not args.graph:
+        print(
+            "ERROR: --graph is required unless --decide-mode-only is given.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     # Load inputs.
     graph = load_graph(args.graph)
@@ -245,18 +330,13 @@ def main():
     target_deps = graph["target_deps"]
     total_targets = len(target_deps)
 
-    with open(args.changed_files) as fp:
-        changed_files = [
-            line.strip() for line in fp if line.strip() and not line.startswith("#")
-        ]
-
     # Check for experimental/ or external/ changes — these are outside
     # the dependency graph (CUDA-only, vendored code) and need a full build.
     full_build_prefixes = ("velox/experimental/", "velox/external/")
     full_build_files = [f for f in changed_files if f.startswith(full_build_prefixes)]
     if full_build_files:
         comment = (
-            "## Build Impact Analysis\n\n"
+            "## Selective Build Plan\n\n"
             "**Full build recommended.** Files outside the dependency graph changed:\n\n"
         )
         for f in full_build_files[:10]:
@@ -270,7 +350,7 @@ def main():
             f"cmake --build _build/{args.build_type}\n"
             "```\n\n"
             "---\n"
-            f"*{args.graph_source or 'Build impact analysis'}*"
+            f"*{args.graph_source or 'Selective build plan'}*"
         )
         with open(args.output, "w") as fp:
             fp.write(comment)
@@ -314,10 +394,10 @@ def main():
 
     if not directly_affected:
         comment = (
-            "## Build Impact Analysis\n\n"
+            "## Selective Build Plan\n\n"
             "No build targets affected by this change.\n\n"
             "---\n"
-            f"*{args.graph_source or 'Build impact analysis'}*"
+            f"*{args.graph_source or 'Selective build plan'}*"
         )
         with open(args.output, "w") as fp:
             fp.write(comment)
@@ -331,7 +411,7 @@ def main():
     selective_targets = compute_selective_build_targets(all_affected, target_deps)
 
     # Generate comment.
-    graph_source = args.graph_source or "Build impact analysis"
+    graph_source = args.graph_source or "Selective build plan"
     comment = generate_comment(
         changed_targets,
         all_affected,
