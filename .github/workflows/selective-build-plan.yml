@@ -297,7 +297,7 @@ jobs:
   prepare-slow:
     needs: decide-mode
     if: needs.decide-mode.outputs.needs_slow_prepare == 'true'
-    runs-on: 8-core-ubuntu
+    runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:adapters
     env:
       VELOX_DEPENDENCY_SOURCE: SYSTEM
