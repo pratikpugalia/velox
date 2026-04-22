@@ -99,7 +99,7 @@ jobs:
     needs: get-changes
     # Gated on is-full-mode so this heavy job only runs after the PR is
     # approved (or on push to main).
-    if: ${{ inputs.is-full-mode && github.repository == 'facebookincubator/velox' }}
+    if: ${{ inputs.is-full-mode }}
     runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:adapters
     defaults:
@@ -472,7 +472,6 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:ubuntu-22.04
     # prevent errors when forks ff their main branch
-    if: ${{ github.repository == 'facebookincubator/velox' }}
     name: Ubuntu debug with system dependencies
     env:
       CCACHE_DIR: ${{ github.workspace }}/ccache
@@ -684,7 +683,7 @@ jobs:
     container: ghcr.io/facebookincubator/velox-dev:fedora
     # Gated on is-full-mode so this build-only job runs only after the PR
     # is approved (or on push to main).
-    if: ${{ inputs.is-full-mode && github.repository == 'facebookincubator/velox' }}
+    if: ${{ inputs.is-full-mode}}
     name: Fedora debug
     env:
       CCACHE_DIR: ${{ github.workspace }}/ccache
