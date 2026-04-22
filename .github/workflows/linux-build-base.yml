@@ -100,7 +100,7 @@ jobs:
     # Gated on is-full-mode so this heavy job only runs after the PR is
     # approved (or on push to main).
     if: ${{ inputs.is-full-mode && github.repository == 'facebookincubator/velox' }}
-    runs-on: 32-core-ubuntu
+    runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:adapters
     defaults:
       run:
@@ -469,7 +469,7 @@ jobs:
           ctest --output-on-failure
 
   ubuntu-debug:
-    runs-on: 32-core-ubuntu
+    runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:ubuntu-22.04
     # prevent errors when forks ff their main branch
     if: ${{ github.repository == 'facebookincubator/velox' }}
@@ -680,7 +680,7 @@ jobs:
           if-no-files-found: ignore
 
   fedora-debug:
-    runs-on: 32-core-ubuntu
+    runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:fedora
     # Gated on is-full-mode so this build-only job runs only after the PR
     # is approved (or on push to main).
