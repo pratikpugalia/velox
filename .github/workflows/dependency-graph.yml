@@ -42,7 +42,7 @@ concurrency:
 
 jobs:
   generate-graph:
-    runs-on: 8-core-ubuntu
+    runs-on: ubuntu-latest
     container: ghcr.io/facebookincubator/velox-dev:adapters
     env:
       VELOX_DEPENDENCY_SOURCE: SYSTEM
