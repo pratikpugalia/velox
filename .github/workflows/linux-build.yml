@@ -29,8 +29,16 @@ on:
       - scripts/setup-helper-functions.sh
       - .github/workflows/linux-build.yml
       - .github/workflows/linux-build-base.yml
+      - .github/workflows/selective-build-plan.yml
+      - .github/scripts/plan-selective-build.py
+      - .github/scripts/generate-dependency-graph.py
+      - .github/actions/generate-dependency-graph/action.yml
 
   pull_request:
+    # Approving reviews trigger a full build via trigger-full-on-approval.yml,
+    # which calls this workflow via workflow_call. There is intentionally no
+    # `labeled` type here — adding a label is not a build-impacting event.
+    types: [opened, synchronize, reopened]
     paths:
       - velox/**
       - '!velox/docs/**'
@@ -42,15 +50,103 @@ on:
       - scripts/setup-helper-functions.sh
       - .github/workflows/linux-build.yml
       - .github/workflows/linux-build-base.yml
+      - .github/workflows/selective-build-plan.yml
+      - .github/scripts/plan-selective-build.py
+      - .github/scripts/generate-dependency-graph.py
+      - .github/actions/generate-dependency-graph/action.yml
+
+  # Called by trigger-full-on-approval.yml after an approval lands. The
+  # caller runs in workflow_run (BASE) context with secrets in scope, but
+  # the inputs/permissions block here intentionally does NOT grant write
+  # access or pass secrets through — the build still runs PR-controlled
+  # code (cmake / setup scripts) and must not have elevated capabilities.
+  workflow_call:
+    inputs:
+      force_full: {type: boolean, default: false, required: false}
+      pr_number: {type: string, default: '', required: false}
+      head_sha: {type: string, default: '', required: false}
+      head_ref: {type: string, default: '', required: false}
+      base_ref: {type: string, default: '', required: false}
+      base_sha: {type: string, default: '', required: false}
+      pr_owner: {type: string, default: '', required: false}
+
+  # Maintainer escape hatch: trigger a full build manually from the
+  # Actions UI for any PR.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to build for (omit for a main-branch build).
+        type: string
+        required: false
+      head_sha:
+        description: PR head SHA (required when pr_number is set).
+        type: string
+        required: false
+      head_ref:
+        description: PR head branch name.
+        type: string
+        required: false
+      base_ref:
+        description: PR base branch name (default main).
+        type: string
+        default: main
+        required: false
+      base_sha:
+        description: PR base SHA.
+        type: string
+        required: false
+      pr_owner:
+        description: PR head repo owner login (matters for fork PRs).
+        type: string
+        required: false
 
 permissions:
   contents: read
+  # selective-build-plan needs `pull-requests: read` (sticky-approval
+  # check, changed-files API) and `actions: read` (locating the cached
+  # dependency-graph artifact). Reusable workflows can't escalate
+  # beyond what the caller grants, so the caller must grant the same.
+  # IMPORTANT: keep this block read-only. linux-build-base runs PR-
+  # controlled code; if it ever needs write (uploading artifacts is fine
+  # via actions/upload-artifact, which uses a separate API), grant it
+  # narrowly at the job level, not here.
+  pull-requests: read
+  actions: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.repository }}-${{ github.head_ref || github.sha }}
+  # When called from approval-bot via workflow_call, github.head_ref is
+  # empty and github.sha is the workflow_run head sha (== PR head SHA).
+  # Group by inputs.head_sha when present so direct pull_request and
+  # workflow_call paths for the same PR collapse onto one slot.
+  group: ${{ github.workflow }}-${{ github.repository }}-${{ inputs.head_sha || github.head_ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
+  # Decide full vs targeted and (when targeted) compute the selective
+  # target list. Uploads the selective-build-comment artifact consumed
+  # by selective-build-comment.yml. Push to main and approval-bot calls
+  # (force_full=true) always resolve to full; PRs with a standing
+  # approving review are also upgraded to full via the sticky check.
+  plan:
+    uses: ./.github/workflows/selective-build-plan.yml
+    with:
+      force_full: ${{ inputs.force_full || false }}
+      pr_number: ${{ inputs.pr_number || '' }}
+      base_sha: ${{ inputs.base_sha || '' }}
+
+  # Run the build. ubuntu-debug / fedora-debug only run in full mode;
+  # adapters always runs and consumes the plan outputs (selective build
+  # of the `--target` list when targeted, or builds everything when the
+  # plan returned full / empty targets).
   linux-gcc:
     name: Build with GCC
+    needs: plan
     uses: ./.github/workflows/linux-build-base.yml
+    with:
+      is-full-mode: ${{ needs.plan.outputs.mode == 'full' }}
+      cmake-targets: ${{ needs.plan.outputs.cmake_targets }}
+      pr_number: ${{ inputs.pr_number || '' }}
+      head_sha: ${{ inputs.head_sha || '' }}
+      head_ref: ${{ inputs.head_ref || '' }}
+      base_ref: ${{ inputs.base_ref || '' }}
+      pr_owner: ${{ inputs.pr_owner || '' }}
