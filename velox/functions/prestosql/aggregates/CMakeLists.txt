@@ -137,6 +137,7 @@ velox_link_libraries(
 if(${VELOX_ENABLE_GEO})
   velox_sources(velox_aggregates PRIVATE GeometryAggregate.cpp)
   velox_link_libraries(velox_aggregates velox_functions_geo)
+  velox_compile_definitions(velox_aggregates PRIVATE VELOX_ENABLE_GEO)
 endif()
 
 if(${VELOX_BUILD_TESTING})
