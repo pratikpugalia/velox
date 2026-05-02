@@ -1,0 +1,175 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Step 2 of the auto-trigger-full-build-on-approval chain.
+#
+# Triggered via workflow_run when detect-approval.yml completes (on a
+# pull_request_review:[submitted] event). workflow_run always runs in
+# BASE context with full GITHUB_TOKEN write access — even for fork
+# PRs. That's the whole point of the chain.
+#
+# Behaviour:
+#   * Download the approval-meta artifact uploaded by detect-approval.
+#   * Dedup: only fire on the FIRST approving review for this head
+#     SHA.
+#   * Find the most recent `Linux Build using GCC` run on the PR head
+#     SHA.
+#   * If the run is still in progress, cancel it and wait for it to
+#     terminate; then re-run it.
+#
+# Why re-run instead of dispatching a fresh build:
+#   GitHub Actions ties each job's check_run to `github.sha` of the
+#   triggering event. A re-run preserves the original `pull_request`
+#   event's SHA, so check_runs land on the PR head SHA and reviewers
+#   see the full build status on the PR. workflow_call from this
+#   workflow_run-triggered context would land check_runs on the
+#   default branch's HEAD instead.
+#
+# When the re-run executes, `selective-build-plan.yml`'s standing-
+# approval check sees the new approval and resolves to full mode
+# automatically — no escalation flag or input plumbing needed.
+
+name: Rerun Linux Build on Approval
+
+on:
+  workflow_run:
+    workflows: [Detect Approval]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write # required by /actions/runs/{id}/{cancel,rerun}
+
+jobs:
+  decide:
+    # Filter on conclusion to avoid running for skipped detect-approval
+    # invocations (non-approving reviews skip the detect job → workflow
+    # conclusion = success-with-skipped or skipped depending on GitHub
+    # internals; either way the artifact won't exist and the download
+    # step exits early).
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      # The artifact is missing for non-approving reviews (detect job
+      # was skipped via `if:`) — continue-on-error lets us bail out
+      # cleanly without failing the workflow.
+      - name: Download approval meta
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: approval-meta
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Read PR meta
+        if: steps.download.outcome == 'success'
+        id: meta
+        run: |
+          # Bail cleanly if the artifact is malformed (missing fields).
+          for field in pr_number head_sha; do
+            value=$(jq -r --arg k "$field" '.[$k] // empty' approval.json)
+            if [ -z "$value" ]; then
+              echo "approval.json missing field $field"
+              exit 0
+            fi
+            echo "$field=$value" >> "$GITHUB_OUTPUT"
+          done
+
+      # Dedup: only fire on the FIRST approving review for this head SHA.
+      # Subsequent approvals (other reviewers, or re-approvals after
+      # dismissal) skip — the prior build re-run is still valid for the
+      # same SHA, no need to re-run again.
+      - name: Dedup against prior approvals on this SHA
+        if: steps.meta.outputs.pr_number
+        id: dedup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.meta.outputs.pr_number }}
+          SHA: ${{ steps.meta.outputs.head_sha }}
+        run: |
+          # Count approving reviews on this exact head SHA. The just-
+          # submitted review (the one that triggered detect-approval) is
+          # already included by the time we query, so == 1 means we are
+          # the first; > 1 means an earlier approval already triggered
+          # the re-run on this same SHA.
+          approvals=$(gh api "/repos/$REPO/pulls/$PR/reviews" \
+            --jq "[.[] | select(.state == \"APPROVED\" and .commit_id == \"$SHA\")] | length")
+          echo "approvals on this SHA: $approvals"
+          if [ "$approvals" -eq 1 ]; then
+            echo "should_rerun=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "should_rerun=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Find latest Linux Build run on PR head
+        if: steps.dedup.outputs.should_rerun == 'true'
+        id: find_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.meta.outputs.head_sha }}
+        run: |
+          # Find the workflow id by name (file path also works but name
+          # is what the API surfaces consistently across renames).
+          wf_id=$(gh api "/repos/$REPO/actions/workflows" \
+            --jq '.workflows[] | select(.name == "Linux Build using GCC") | .id')
+          if [ -z "$wf_id" ]; then
+            echo "::error::could not resolve workflow id for 'Linux Build using GCC'"
+            exit 1
+          fi
+          # Most recent run on this PR head SHA.
+          run_json=$(gh api "/repos/$REPO/actions/workflows/$wf_id/runs?head_sha=$SHA&per_page=1" \
+            --jq '.workflow_runs[0] // empty')
+          if [ -z "$run_json" ]; then
+            echo "no Linux Build run found for $SHA — nothing to re-run"
+            exit 0
+          fi
+          run_id=$(echo "$run_json" | jq -r '.id')
+          run_status=$(echo "$run_json" | jq -r '.status')
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "run_status=$run_status" >> "$GITHUB_OUTPUT"
+          echo "Found run $run_id (status=$run_status)"
+
+      - name: Cancel in-flight run if needed
+        if: steps.find_run.outputs.run_id && steps.find_run.outputs.run_status != 'completed'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ steps.find_run.outputs.run_id }}
+        run: |
+          # Cancel is async; rerun won't accept a non-completed run.
+          # Issue cancel, then poll until the run reaches a terminal
+          # status. Cap the wait at ~5 minutes so a stuck run doesn't
+          # block the chain forever.
+          gh api -X POST "/repos/$REPO/actions/runs/$RUN_ID/cancel" || true
+          for _ in $(seq 1 30); do
+            status=$(gh api "/repos/$REPO/actions/runs/$RUN_ID" --jq '.status')
+            echo "  poll: status=$status"
+            if [ "$status" = "completed" ]; then break; fi
+            sleep 10
+          done
+
+      - name: Rerun
+        if: steps.find_run.outputs.run_id
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ steps.find_run.outputs.run_id }}
+        run: |
+          gh api -X POST "/repos/$REPO/actions/runs/$RUN_ID/rerun"
+          echo "Re-ran $RUN_ID; check_runs will appear under the original PR head SHA."
