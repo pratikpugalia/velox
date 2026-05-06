@@ -34,8 +34,26 @@ runs:
       shell: bash
       env:
         MAKEFLAGS: NUM_THREADS=8
+        # Mirror the adapters job: build FAISS from source instead of
+        # resolving the system-installed package. The system FAISS
+        # config (/usr/local/share/faiss/faiss-config.cmake) sets the
+        # link interface of the imported `faiss` target to include
+        # OpenMP::OpenMP_CXX without ever calling find_package(OpenMP)
+        # to define it, so a SYSTEM resolution fails the configure.
+        faiss_SOURCE: BUNDLED
       run: |
+        # The adapters image exports CC/CXX pointing at GCC 12 (used
+        # during image build). CMake honors those env vars over PATH,
+        # so without an explicit override the configure runs as GCC 12.
+        # That fails when CUDF is on (cuDF requires GCC >= 13.3); CUDF
+        # is off here but mirror the adapters job's GCC 14 setup
+        # anyway so cmake feature detection matches what the actual
+        # build sees. CUDF and WAVE stay off because both gate code
+        # under velox/experimental/, which the planner short-circuits
+        # to full mode via FULL_BUILD_PREFIXES, so their targets are
+        # never consulted from the dep graph.
         source /opt/rh/gcc-toolset-14/enable
+        export CC=gcc CXX=g++
         cmake -B _build/release -GNinja \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           -DVELOX_MONO_LIBRARY=OFF \
@@ -48,7 +66,8 @@ runs:
           -DVELOX_ENABLE_S3=ON \
           -DVELOX_ENABLE_GCS=ON \
           -DVELOX_ENABLE_ABFS=ON \
-          -DVELOX_ENABLE_WAVE=ON
+          -DVELOX_ENABLE_FAISS=ON \
+          -DVELOX_ENABLE_REMOTE_FUNCTIONS=ON
 
     - name: Generate dependency graph
       shell: bash

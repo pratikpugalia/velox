@@ -1,0 +1,58 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Step 1 of the auto-trigger-full-build-on-approval chain.
+#
+# Fires on every pull_request_review:[submitted] event. For fork PRs,
+# this event runs in fork-PR context — the YAML loaded here is from the
+# PR's head ref, and any data this workflow writes is attacker-
+# controllable. The chained rerun-on-approval.yml (workflow_run, BASE
+# context) deliberately ignores everything we could put in an artifact
+# and re-derives PR identity from `workflow_run.id` (GitHub-set, not
+# forgeable).
+#
+# This workflow exists solely to fire `workflow_run`. Keep it trivial:
+# no env binding of PR fields, no artifact upload, no jq — anything
+# beyond a no-op echo would be a forgery surface, since the chained
+# workflow doesn't trust this output anyway.
+#
+# Why the workflow_run split exists: GitHub blocks secrets and write
+# tokens for any event triggered from a fork PR (pull_request_review
+# included). The only way to land write-capable context (needed for
+# /actions/runs/{id}/{cancel,rerun}) is to chain through workflow_run,
+# which always runs in BASE context.
+
+name: Detect Approval
+
+# zizmor:disable:dangerous-triggers -- pull_request_review fires in
+# privileged context, but no PR-controlled code is executed and the
+# only secret-touching action runs in the chained workflow.
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    if: github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log approval (no PR-controlled output)
+        run: |
+          echo "approval detected for PR #${{ github.event.pull_request.number }}"
+          echo "head sha: ${{ github.event.pull_request.head.sha }}"
+          echo "(rerun-on-approval re-derives both via workflow_run.id)"
