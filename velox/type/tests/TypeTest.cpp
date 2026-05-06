@@ -1499,3 +1499,5 @@ TEST(TypeTest, timeToIso8601) {
   EXPECT_EQ("10:12:55.038", toIso8601(10, 12, 55, 38'000));
   EXPECT_EQ("23:59:59.999999", toIso8601(23, 59, 59, 999'999));
 }
+
+// no-op touch to exercise selective build CI on PR #17260; safe to revert
