@@ -70,7 +70,8 @@ jobs:
             exit 0
           fi
 
-          pr_number=$(gh api \
+          source .github/scripts/gh-api-retry.sh
+          pr_number=$(gh_api \
             "/repos/${REPO}/pulls?head=${HEAD_OWNER}:${HEAD_BRANCH}&state=open" \
             -q '.[0].number // empty')
 
@@ -118,7 +119,8 @@ jobs:
             # No failure artifacts — build metadata from failed jobs in the run.
             # This handles workflows (e.g., Fuzzer Jobs) that don't upload
             # ci-failure-* artifacts.
-            METADATA=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" \
+            source .github/scripts/gh-api-retry.sh
+            METADATA=$(gh_api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" \
               --paginate --jq '[.jobs[] | select(.conclusion == "failure") | {job: .name, type: "unknown"}]')
             if [ "$METADATA" = "[]" ] || [ -z "$METADATA" ]; then
               echo "No failure artifacts or failed jobs found."
