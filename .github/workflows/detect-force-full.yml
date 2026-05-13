@@ -1,0 +1,79 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Step 1 of the auto-trigger-full-build chain.
+#
+# Fires on either of two events that should escalate a PR's selective
+# build to a full build:
+#   * pull_request_review:[submitted]   — gated to state == 'approved'
+#   * issue_comment:[created]           — gated to a PR comment whose
+#                                         body contains `/full-build`
+#
+# pull_request_review on a fork PR runs in fork-PR context (the YAML
+# loaded here is from the PR head ref, attacker-controllable).
+# issue_comment runs in BASE context but with a restricted token. In
+# both cases, the chained rerun-on-force-full.yml (workflow_run, BASE
+# context) deliberately ignores everything we could put in an artifact
+# and re-derives PR identity from `workflow_run.id` (GitHub-set, not
+# forgeable) before doing any privileged work.
+#
+# This workflow exists solely to fire `workflow_run`. Keep it
+# trivial: no env binding of PR fields, no artifact upload, no jq —
+# anything beyond a no-op echo would be a forgery surface, since the
+# chained workflow doesn't trust this output anyway.
+#
+# Why the workflow_run split exists: GitHub blocks `actions: write` for
+# workflows triggered by fork-PR events (`pull_request_review` and
+# `issue_comment` both included). The only way to land write-capable
+# context — needed for /actions/runs/{id}/{cancel,rerun} — is to chain
+# through workflow_run, which always runs in BASE context.
+
+name: Detect Force-Full Trigger
+
+# zizmor:disable:dangerous-triggers -- both triggers fire in
+# privileged context, but no PR-controlled code is executed and the
+# only secret-touching action runs in the chained workflow.
+
+on:
+  pull_request_review:
+    types: [submitted]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    # Approval path or /full-build comment path. Anything else (non-
+    # approving review, non-PR issue comment, comment without
+    # /full-build) is a no-op.
+    if: >
+      (github.event_name == 'pull_request_review' &&
+       github.event.review.state == 'approved') ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       contains(github.event.comment.body, '/full-build'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log trigger (no PR-controlled output)
+        run: |
+          echo "force-full trigger: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            echo "PR #${{ github.event.issue.number }}"
+          else
+            echo "PR #${{ github.event.pull_request.number }}"
+            echo "head sha: ${{ github.event.pull_request.head.sha }}"
+          fi
+          echo "(rerun-on-force-full re-derives both via workflow_run.id)"
