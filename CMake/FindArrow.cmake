@@ -43,5 +43,16 @@ if(Arrow_FOUND AND NOT TARGET arrow)
     arrow
     PROPERTIES IMPORTED_LOCATION ${ARROW_LIB} INTERFACE_LINK_LIBRARIES thrift
   )
-  set_target_properties(arrow_testing PROPERTIES IMPORTED_LOCATION ${ARROW_TESTING_LIB})
+  # arrow_testing's gtest_util.cc.o references arrow::ipc::internal::json::*
+  # and arrow::Initialize symbols defined in libarrow.a. Without declaring
+  # the dependency, CMake doesn't position arrow_testing before arrow in the
+  # link line, ld --as-needed processes libarrow.a before any reference to
+  # those symbols exists, and the link fails with "undefined reference".
+  # Visible only when nothing else in the link line drags those symbols in
+  # first — i.e. with VELOX_MONO_LIBRARY=ON, where libvelox is one big lib
+  # that doesn't transitively reference arrow's json IPC.
+  set_target_properties(
+    arrow_testing
+    PROPERTIES IMPORTED_LOCATION ${ARROW_TESTING_LIB} INTERFACE_LINK_LIBRARIES arrow
+  )
 endif()

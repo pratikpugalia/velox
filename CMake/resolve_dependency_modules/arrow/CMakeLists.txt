@@ -110,8 +110,14 @@ if(VELOX_ENABLE_ARROW)
   )
   set_target_properties(arrow PROPERTIES IMPORTED_LOCATION ${ARROW_LIBDIR}/libarrow.a)
   set_property(TARGET arrow PROPERTY INTERFACE_LINK_LIBRARIES ${RE2} thrift)
+  # arrow_testing's gtest_util.cc.o references arrow::ipc::internal::json::*
+  # and arrow::Initialize symbols defined in libarrow.a. Without declaring
+  # the dependency, CMake doesn't position arrow_testing before arrow in
+  # the link line, ld processes libarrow.a before any reference to those
+  # symbols exists, and consumers fail with "undefined reference".
+  # Mirrors the same fix in CMake/FindArrow.cmake for the SYSTEM-arrow path.
   set_target_properties(
     arrow_testing
-    PROPERTIES IMPORTED_LOCATION ${ARROW_LIBDIR}/libarrow_testing.a
+    PROPERTIES IMPORTED_LOCATION ${ARROW_LIBDIR}/libarrow_testing.a INTERFACE_LINK_LIBRARIES arrow
   )
 endif()
